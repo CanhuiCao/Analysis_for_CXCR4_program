@@ -1,0 +1,25 @@
+# Read rds data
+data <- readRDS("infile.rds")
+
+# Build S4 object
+HSMM <- newCellDataSet(count, phenoData = pd, featureData = fd)
+
+# Estimate size factors and dispersions
+HSMM <- estimateSizeFactors(HSMM)
+HSMM <- estimateDispersions(HSMM)
+
+# Filter low-quality genes
+HSMM <- detectGenes(HSMM, min_expr = mins)
+
+# Select genes
+diff_test_res <- differentialGeneTest(HSMM[expressed_genes,], fullModelFormulaStr = "~ Clusters")
+HSMM <- setOrderingFilter(HSMM, ordering_gene)
+
+# Dimensionality reduction
+HSMM <- reduceDimension(HSMM, max_components = max_components, method = method)
+HSMM <- orderCells(HSMM)
+
+# Visualization
+plot_cell_trajectory(HSMM, color_by = "Cluster") 
+plot_cell_trajectory(HSMM, color_by = "Sample") 
+plot_cell_trajectory(HSMM, color_by = "Pseudotime") 
