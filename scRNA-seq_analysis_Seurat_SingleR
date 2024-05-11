@@ -1,0 +1,69 @@
+# Read part of the matrix file from CellRanger
+Data <- read.table("matrix.csv")
+
+# Create SeuratObject
+data <- CreateSeuratObject(counts = Data)
+
+# Calculate mitochondrial percentage
+data[["percent.mt"]] <- PercentageFeatureSet(data, features = mt_genes)
+
+# Data normalization
+data <- NormalizeData(data, normalization.method = method)
+
+# Analyze variable genes
+data <- FindVariableFeatures(data, selection.method = method, nfeatures = feature)
+
+# Integration across multiple samples
+Rumen.anchors <- FindIntegrationAnchors(object.list = list, dims = 1:pca)
+Rumen.integrated <- IntegrateData(anchorset = Rumen.anchors, dims = 1:pca)
+
+# Dimensionality reduction
+Rumen.integrated <- ScaleData(Rumen.integrated)
+Rumen.integrated <- RunPCA(Rumen.integrated, npcs = pca)
+Rumen.integrated <- RunUMAP(Rumen.integrated, dims = 1:pca)
+Rumen.integrated <- RunTSNE(Rumen.integrated, dims = 1:pca)
+
+# Plot UMAP
+umap <- DimPlot(Rumen.integrated, reduction = "umap")
+
+# Plot t-SNE
+tsne <- DimPlot(Rumen.integrated, reduction = "tsne")
+
+# Clustering
+Rumen.integrated <- FindNeighbors(Rumen.integrated, dims = 1:pca)
+Rumen.integrated <- FindClusters(Rumen.integrated, resolution = resolutions)
+
+# Save as rds
+saveRDS(Rumen.integrated, "Rumen_integrated.rds")
+
+# Differential expression
+Rumen.integrated.markers <- FindAllMarkers(Rumen.integrated)
+
+# Plot heatmap
+DoHeatmap(Rumen.integrated, features = feature)
+
+# Plot dot plot
+DotPlot(Rumen.integrated, features = feature)
+
+# Read clustering results
+ctrl <- readRDS("seurat.rds")
+
+# SingleR annotation
+test <- as.SingleCellExperiment(ctrl)
+Anno <- SingleR(test = test, ref = BL, method = method)
+
+# Plot UMAP
+test@meta.data$labels <- Anno$labels
+DimPlot(test, reduction = "umap")
+
+# Plot t-SNE
+DimPlot(test, reduction = "tsne")
+
+# Plot heatmap
+DoHeatmap(test, features = feature)
+
+# Plot dot plot
+DotPlot(test, features = feature)
+
+# Use CellCycleScoring function to calculate cell cycle scores
+marrow <- CellCycleScoring(marrow, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
