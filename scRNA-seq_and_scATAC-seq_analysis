@@ -1,0 +1,52 @@
+library(patchwork)
+library(Signac)
+library(Seurat)
+library(ggplot2)
+library(hdf5r)
+library(spatstat.geom)
+library(biovizBase)
+
+# Integrating with scRNA-seq data
+
+# Load Seurat object for scRNA-seq
+pbmc_rna <- readRDS("scRNAseq.rds")
+
+# Load Seurat object for scATAC-seq
+pbmc <- readRDS("scATACseq.rds")
+
+# Classical association algorithm (CCA) originally used to correct batch effects, here used to integrate RNA (reference) and ATAC (query) data, finding anchors between RNA and ATAC
+transfer.anchors <- FindTransferAnchors(  
+  reference = pbmc_rna,
+  query = pbmc,
+  reduction = 'cca')
+
+# Predicted cell labels
+predicted.labels <- TransferData(          
+  anchorset = transfer.anchors,
+  refdata = pbmc_rna$celltype,
+  weight.reduction = pbmc[['lsi']],
+  dims = 2:30
+)
+
+pbmc <- AddMetaData(object = pbmc, metadata = predicted.labels)  # Add predicted cell labels to pbmc's meta.data
+
+## Visualize both types of data
+plot1 <- DimPlot(object = pbmc_rna, group.by = 'celltype', label = TRUE, repel = TRUE) + NoLegend() + ggtitle('scRNA-seq')
+plot2 <- DimPlot(object = pbmc, group.by = 'predicted.id', label = TRUE, repel = TRUE) + NoLegend() + ggtitle('scATAC-seq')
+plot1 + plot2
+
+# Find differentially accessible peaks between clusters
+DefaultAssay(pbmc) <- 'peaks'  
+
+da_peaks <- FindAllMarkers(
+  object = pbmc,
+  latent.vars = 'peak_region_fragments'
+)
+
+# Plot genomic regions
+CoveragePlot(
+  object = pbmc,
+  region = rownames(da_peaks)[1],
+  extend.upstream = 40000,
+  extend.downstream = 20000
+)
