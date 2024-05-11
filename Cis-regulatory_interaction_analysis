@@ -1,0 +1,126 @@
+library(cicero)
+
+cicero_data <- read.table("Count.xls",header = TRUE)
+#change data.frame to cds object
+input_cds <- make_atac_cds(cicero_data, binarize = TRUE)
+
+# Add some cell meta-data
+cell_data <- read.table("cluster.xls",header = TRUE,row.names= 1)
+pData(input_cds) <- cbind(pData(input_cds), cell_data[row.names(pData(input_cds)),])
+pData(input_cds)$cell <- NULL
+
+#Running Cicero
+set.seed(2017)
+input_cds <- detectGenes(input_cds)
+input_cds <- estimateSizeFactors(input_cds)
+
+#input_cds <- preprocessCDS(input_cds, norm_method = "none")
+input_cds <- reduceDimension(input_cds, max_components = 2, num_dim=6,
+                      reduction_method = 'tSNE', norm_method = "none")
+
+# access the tSNE coordinates from the input CDS object
+tsne_coords <- t(reducedDimA(input_cds))
+row.names(tsne_coords) <- row.names(pData(input_cds))
+cicero_cds <- make_cicero_cds(input_cds, reduced_coordinates = tsne_coords)
+
+# Cicero co-accessibility scores
+data("human.hg19.genome")
+sample_genome <- subset(human.hg19.genome, V1 == "chr18")
+conns <- run_cicero(cicero_cds, sample_genome) # Takes a few minutes to run
+head(conns)
+
+#Visualizing Cicero Connections
+data(gene_annotation_sample)
+plot_connections(conns, "chr18", 8575097, 8839855, 
+                gene_model = gene_annotation_sample, 
+                coaccess_cutoff = .25, 
+                connection_width = .5, 
+                collapseTranscripts = "longest" )
+
+#Comparing Cicero connections to other datasets
+
+chia_conns <-  data.frame(Peak1 = c("chr18_10000_10200", "chr18_10000_10200", 
+                                  "chr18_49500_49600"), 
+                        Peak2 = c("chr18_10600_10700", "chr18_111700_111800", 
+                                  "chr18_10600_10700"))
+head(chia_conns)
+
+conns$in_chia <- compare_connections(conns, chia_conns)
+head(conns)
+
+# Add a column of 1s called "coaccess"
+chia_conns <-  data.frame(Peak1 = c("chr18_10000_10200", "chr18_10000_10200", 
+                                  "chr18_49500_49600"), 
+                        Peak2 = c("chr18_10600_10700", "chr18_111700_111800", 
+                                  "chr18_10600_10700"),
+                        coaccess = c(1, 1, 1))
+plot_connections(conns, "chr18", 10000, 112367, 
+                gene_model = gene_annotation_sample, 
+                coaccess_cutoff = 0,
+                connection_width = .5,
+                comparison_track = chia_conns,
+                include_axis_track = F,
+                collapseTranscripts = "longest") 
+
+# Single-cell accessibility trajectories
+input_cds <- make_atac_cds(cicero_data, binarize = TRUE)
+
+# Add some cell meta-data
+data("cell_data")
+pData(input_cds) <- cbind(pData(input_cds), cell_data[row.names(pData(input_cds)),])
+pData(input_cds)$cell <- NULL
+
+agg_cds <- aggregate_nearby_peaks(input_cds, distance = 10000)
+agg_cds <- detectGenes(agg_cds)
+agg_cds <- estimateSizeFactors(agg_cds)
+agg_cds <- estimateDispersions(agg_cds)
+
+#Choosing sites that define progress
+# This takes a few minutes to run
+diff_timepoint <- differentialGeneTest(agg_cds,
+                    fullModelFormulaStr="~timepoint + num_genes_expressed")
+
+# We chose a very high q-value cutoff because there are so few sites in the sample dataset, in general a q-value cutoff in the range of 0.01 to 0.1 would be appropriate
+ordering_sites <- row.names(subset(diff_timepoint, qval < 1))
+
+#Choose sites by dpFeature
+plot_pc_variance_explained(agg_cds, return_all = F) #Choose 2 PCs
+
+agg_cds <- reduceDimension(agg_cds,
+                            max_components = 2,
+                            norm_method = 'log',
+                            num_dim = 3,
+                            reduction_method = 'tSNE',
+                            verbose = T)
+
+agg_cds <- clusterCells(agg_cds, verbose = F)
+
+plot_cell_clusters(agg_cds, color_by = 'as.factor(Cluster)')
+
+clustering_DA_sites <- differentialGeneTest(agg_cds, #Takes a few minutes
+                                          fullModelFormulaStr = '~Cluster')
+
+ordering_sites <-
+row.names(clustering_DA_sites)[order(clustering_DA_sites$qval)][1:1000]
+
+# Reduce the dimensionality of the data and order cells
+agg_cds <- setOrderingFilter(agg_cds, ordering_sites)
+
+agg_cds <- reduceDimension(agg_cds, max_components = 2,
+        residualModelFormulaStr="~as.numeric(num_genes_expressed)",
+        reduction_method = 'DDRTree')
+agg_cds <- orderCells(agg_cds)
+plot_cell_trajectory(agg_cds, color_by = "timepoint")
+
+# plot
+plot_cell_trajectory(agg_cds, color_by = "State")
+agg_cds <- orderCells(agg_cds, root_state = 4)
+plot_cell_trajectory(agg_cds, color_by = "Pseudotime")
+
+pData(input_cds)$Pseudotime <- pData(agg_cds)[colnames(input_cds),]$Pseudotime
+pData(input_cds)$State <- pData(agg_cds)[colnames(input_cds),]$State
+
+# Differential Accessibility Analysis
+input_cds_lin <- input_cds[,row.names(subset(pData(input_cds), State  != 5))]
+
+plot_accessibility_in_pseudotime(input_cds_lin[c("chr18_38156577_38158261", "chr18_48373358_48374180", "chr18_60457956_60459080")])
