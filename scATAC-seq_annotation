@@ -1,0 +1,117 @@
+library(patchwork)
+library(Signac)
+library(Seurat)
+library(ggplot2)
+library(hdf5r)
+library(spatstat.geom)
+library(biovizBase)
+
+setwd("path")  # Set working directory
+
+# Read CSV metadata file
+metadata <- read.csv(
+  file = "path/A_singlecell.csv",
+  header = TRUE,
+  row.names = 1
+) 
+
+# Read Peak/Cell matrix
+counts <- Read10X_h5(filename = "path/A_filtered_peak_bc_matrix.h5")
+
+# Create ChromatinAssay
+chrom_assay <- CreateChromatinAssay(
+  counts = counts,
+  sep = c(":", "-"),
+  genome = 'hg19',
+  fragments = 'path/A_fragments.tsv.gz',
+  min.cells = 10,
+  min.features = 200
+)
+
+# Annotation
+mm10 <- readRDS("mm10.RDS")
+annotations <- readRDS("annotations_mm10.RDS")
+chrom_assay <- CreateChromatinAssay(
+  counts = counts,
+  sep = c(":", "-"),
+  genome = mm10,
+  fragments = fragment,
+  min.cells = 10,  # Include features detected in at least this many cells
+  min.features = 1000  # Include cells where at least this many features are detected
+)
+
+# Create Seurat object with ChromatinAssay
+pbmc <- CreateSeuratObject(
+  counts = chrom_assay,
+  assay = "peaks",
+  meta.data = metadata
+)
+
+# Add annotation
+Annotation(pbmc) <- annotations
+
+# Compute nucleosome signal score per cell
+pbmc <- NucleosomeSignal(object = pbmc)
+pbmc$nucleosome_group <- ifelse(pbmc$nucleosome_signal > 4, 'NS > 4', 'NS < 4')
+FragmentHistogram(object = pbmc, group.by = 'nucleosome_group')
+
+# Compute Transcriptional start site (TSS) enrichment score
+pbmc <- TSSEnrichment(object = pbmc, fast = FALSE)
+
+# Add percentage of reads in peaks and blacklist ratio to meta data
+pbmc$pct_reads_in_peaks <- pbmc$peak_region_fragments / pbmc$passed_filters * 100
+pbmc$blacklist_ratio <- pbmc$blacklist_region_fragments / pbmc$peak_region_fragments
+
+# Plot violin plots for the above five metrics
+VlnPlot(
+  object = pbmc,
+  features = c('pct_reads_in_peaks', 'peak_region_fragments', 'TSS.enrichment', 'blacklist_ratio', 'nucleosome_signal'),
+  pt.size = 0.1,
+  ncol = 5
+)
+
+# Filter
+pbmc <- subset(
+  x = pbmc,
+  subset = peak_region_fragments > 1000 &
+    peak_region_fragments < 50000 &
+    pct_reads_in_peaks > 10 &
+    blacklist_ratio < 0.05 &
+    nucleosome_signal < 4 &
+    TSS.enrichment > 2
+)
+
+# Dimension reduction
+pbmc <- RunTFIDF(pbmc)  # Normalization
+pbmc <- FindTopFeatures(pbmc, min.cutoff = 'q0')  # Feature selection
+pbmc <- RunSVD(pbmc)  # Dimension reduction
+
+# Reduce dimensionality using RunUMAP()
+pbmc <- RunUMAP(object = pbmc, reduction = 'lsi', dims = 2:30)
+# Calculate distances between samples based on the reduced data using FindNeighbors()
+pbmc <- FindNeighbors(object = pbmc, reduction = 'lsi', dims = 2:30)
+# Cluster the adjacency graph using FindClusters()
+pbmc <- FindClusters(object = pbmc, verbose = FALSE, algorithm = 3)
+# Visualize clustering results using DimPlot()
+DimPlot(object = pbmc, label = TRUE) + NoLegend()
+
+# Create gene activity expression matrix
+gene.activities <- GeneActivity(pbmc) 
+
+# Add the activity matrix to the pbmc object
+pbmc[['RNA']] <- CreateAssayObject(counts = gene.activities)
+
+# Normalize data
+pbmc <- NormalizeData(object = pbmc, assay = 'RNA', normalization.method = 'LogNormalize', scale.factor = median(pbmc$nCount_RNA))
+
+# Set default assay to 'RNA'
+DefaultAssay(pbmc) <- 'RNA'
+
+# Visualize marker genes' activity values to interpret ATAC-seq clusters
+FeaturePlot(
+  object = pbmc,
+  features = c('GENE'),
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3
+)
