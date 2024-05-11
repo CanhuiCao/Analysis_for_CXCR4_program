@@ -1,0 +1,43 @@
+library(Seurat)
+# Load example scRNA-seq data
+seurat <- get(load("seurat.rds"))
+# View cell dimensionality reduction clustering information
+DimPlot(seurat, label = T) + NoLegend()
+
+# Integrated analysis
+seurat <- combineExpression(combined, seurat, 
+                            cloneCall="gene", 
+                            groupBy = "sample", 
+                            proportion = FALSE, 
+                            cloneTypes=c(Single=1, Small=5, Medium=20, Large=100, Hyperexpanded=500))
+
+# View distribution based on clonotype type
+
+slot(seurat, "meta.data")$cloneType <- factor(slot(seurat, "meta.data")$cloneType, 
+                                              levels = c("Hyperexpanded (100 < X <= 500)", 
+                                                         "Large (20 < X <= 100)", 
+                                                         "Medium (5 < X <= 20)", 
+                                                         "Small (1 < X <= 5)", 
+                                                         "Single (0 < X <= 1)", NA))
+DimPlot(seurat, group.by = "cloneType") +
+  scale_color_manual(values = colorblind_vector(5), na.value="grey")
+
+# Show clones of specific sequences
+seurat <- highlightClonotypes(seurat, cloneCall= "aa", sequence = c("CAVNGGSQGNLIF_CSAEREDTDTQYF", "NA_CATSATLRVVAEKLFF"))
+DimPlot(seurat, group.by = "highlight")
+
+# Show cluster or other variables in seurat object metadata
+occupiedscRepertoire(seurat, x.axis = "cluster")
+
+# Show clonotypes that span multiple categories
+
+alluvialClonotypes(seurat, cloneCall = "gene", 
+                   y.axes = c("Patient", "cluster", "Type"), 
+                   color = "TRAV12-2.TRAJ42.TRAC_TRBV20-1.TRBJ2-3.TRBD2.TRBC2") + 
+  scale_fill_manual(values = c("grey", colorblind_vector(1)))
+
+# Sankey diagram showing relationships between clonotype across different patient-cluster-type 
+
+alluvialClonotypes(seurat, cloneCall = "gene", 
+                   y.axes = c("Patient", "cluster", "Type"), 
+                   color = "cluster") 
