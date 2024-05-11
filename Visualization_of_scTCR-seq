@@ -1,0 +1,49 @@
+# Convert fastq to matrix: cellranger vdj --id=S2-10XTCR --reference=refdata-gex-GRCh38-2020-A --fastqs= --chain=TR --sample=
+
+library(venn)
+library(Seurat)
+library(scRepertoire)
+library(tidyverse)
+library(patchwork)
+library(pheatmap)
+library(VennDiagram)
+
+S1 <- read.csv(".../Sample1/outs/filtered_contig_annotations.csv")
+S2 <- read.csv(".../Sample2/outs/filtered_contig_annotations.csv")
+S3 <- read.csv(".../Sample3/outs/filtered_contig_annotations.csv")
+S4 <- read.csv(".../Sample4/outs/filtered_contig_annotations.csv")
+...
+
+contig_list <- list(S1,S2,S3,S4,...)
+
+# Combine VDJ overlapping groups and construct TCR clones
+combined <- combineTCR(contig_list, 
+                       samples = c("A", "B", "C", "D", ... ), 
+                       ID = c("A", "B", "C", "D", ... ), 
+                       cells ="T-AB")
+
+# Plot quality graphs
+quantContig(combined, cloneCall="gene+nt", scale = TRUE)
+abundanceContig(combined, cloneCall = "gene", scale = FALSE)
+lengthContig(combined, cloneCall="aa", chains = "combined") 
+lengthContig(combined, cloneCall="nt", chains = "TRA") 
+
+# Separate specific clone sequences
+compareClonotypes(combined, numbers = 10, 
+                  samples = c("A", "B", "C", "D", ...), 
+                  cloneCall="aa", graph = "alluvial")
+
+# Visualize TCR or BCR genes
+
+vizVgenes(combined, TCR="TCR1", facet.x = "sample", facet.y = "ID")
+
+# Clonal Space Homeostasis
+clonalHomeostasis(combined, cloneCall = "gene")
+clonalHomeostasis(combined, cloneCall = "aa")
+
+# Clonal Proportion
+clonalProportion(combined, cloneCall = "gene") 
+clonalProportion(combined, cloneCall = "nt") 
+
+# Overlap Analysis
+clonalOverlap(combined, cloneCall = "gene+nt", method = "morisita")
