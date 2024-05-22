@@ -1,0 +1,44 @@
+# Quality control after sequencing
+/Work/local/bin/fastp -i con-tox-1.R1.fq.gz -o con-tox-1.clean.R1.fq.gz -I con-tox-1.R2.fq.gz -O con-tox-1.clean.R2.fq.gz -h con-tox-1.QC.report.html -j con-tox-1.QC.report.json -w 4
+
+# Run FastQC for statistics
+/Work/pipeline/software/Bin/fastqc -t 8 --extract -o . con-tox-1.clean.R1.fq.gz con-tox-1.clean.R2.fq.gz
+
+# Alignment
+/Work/local/bin/bowtie2 -x reference_index -1 con-tox-1.clean.R1.fq.gz -2 con-tox-1.clean.R2.fq.gz -p 8 -S con-tox-1.sam
+/Work/pipeline/software/Bin/samtools sort -@ 8 con-tox-1.sam -o con-tox-1.sorted.bam
+/Work/pipeline/software/Bin/samtools flagstat con-tox-1.sorted.bam > con-tox-1.bamstat.txt
+/Work/pipeline/software/Bin/samtools rmdup con-tox-1.sorted.bam con-tox-1.rmdup.bam
+/Work/pipeline/software/Bin/samtools view -@ 4 -b con-tox-1.rmdup.bam -q 30 -o con-tox-1.unique.bam
+/Work/pipeline/software/Bin/samtools index con-tox-1.unique.bam
+
+# Convert BAM to BigWig
+/Work/local/bin/bamCoverage --binSize 5 --normalizeUsing RPKM -b con-tox-1.unique.bam -o con-tox-1.unique.bw
+
+# ChIP-seq data quality control
+/Work/local/bin/plotFingerprint -p 4 -b con*.bam --minMappingQuality 30 --skipZeros --numberOfSamples 50000 --plotFile con.fingerprints.png --outRawCounts fingerprints.tab
+/Work/local/bin/computeMatrix scale-regions -p 8 --regionsFileName reference.bed  --scoreFileName *.bw --outFileName gene_body.computeMatrix.mat.gz --regionBodyLength 3000 --beforeRegionStartLength 3000 --afterRegionStartLength 3000 --skipZeros --smartLabels --numberOfProcessors 8
+/Work/local/bin/plotProfile -m gene_body.computeMatrix.mat.gz --perGroup -out gene_body.plotProfile.pdf
+/Work/local/bin/plotHeatmap --matrixFile gene_body.computeMatrix.mat.gz --outFileName gene_body.plotHeatmap.pdf --outFileNameMatrix gene_body.plotHeatmap.mat.tab
+
+/Work/local/bin/computeMatrix reference-point -p 8 --referencePoint TSS -b 3000 -a 3000 -S *.bw -R reference.bed --missingDataAsZero --skipZeros -o matrix.mat_all.gz --outFileSortedRegions sample.merged_region.bed
+/Work/local/bin/plotProfile -m matrix.mat_all.gz --perGroup -out TSS.plotProfile.pdf
+/Work/local/bin/plotHeatmap --matrixFile matrix.mat_all.gz --outFileName TSS.plotHeatmap.pdf --outFileNameMatrix TSS.plotHeatmap.mat.tab
+
+# Peak calling
+/Work/local/bin/macs2 callpeak -t con-tox-1.unique.bam -c con-imput.unique.bam -n con-tox-1 -f BAMPE -B -g mm --pvalue 0.01
+
+# Peak annotation
+R package ChIPseeker
+Usage: https://bioconductor.org/packages/release/bioc/vignettes/ChIPseeker/inst/doc/ChIPseeker.html
+
+# Peak motif analysis
+/Work/local/bin/findMotifsGenome.pl con-tox-1_peaks.bed Mus_musculus.fa ./ -p 8
+cat knownResults/*.motif > known.motif
+cat homerResults/*.motif > novel.motif
+/Work/local/bin/findMotifsGenome.pl con-tox-1_peaks.bed Mus_musculus.fa ./ -find known.motif > known.motif.peak.out.txt
+/Work/local/bin/findMotifsGenome.pl con-tox-1_peaks.bed Mus_musculus.fa ./ -find novel.motif > novel.motif.peak.out.txt
+
+## Differential peak analysis
+R package MAnorm2
+Usage: https://github.com/tushiqi/MAnorm2
